@@ -4,22 +4,25 @@ import random
 import numpy as np
 import tensorflow as tf
 
+import time
+
 class DQN:
-  REPLAY_MEMORY_SIZE = 10000
-  RANDOM_ACTION_DECAY = 0.99
+  REPLAY_MEMORY_SIZE = 1000000
+  RANDOM_ACTION_DECAY = 0.99999
   MIN_RANDOM_ACTION_PROB = 0.1
   HIDDEN1_SIZE = 20
   HIDDEN2_SIZE = 20
   NUM_EPISODES = 10000
   MAX_STEPS = 1000
-  LEARNING_RATE = 0.001
-  MINIBATCH_SIZE = 30
-  DISCOUNT_FACTOR = 0.9
-  TARGET_UPDATE_FREQ = 300
+  LEARNING_RATE = 0.00025
+  MINIBATCH_SIZE = 32
+  DISCOUNT_FACTOR = 0.99
+  TARGET_UPDATE_FREQ = 10000
   REG_FACTOR = 0.001
   LOG_DIR = '/tmp/dqn'
+  DROPOUT = 0.9
 
-  random_action_prob = 0.5
+  random_action_prob = 1.0
   replay_memory = []
 
   def __init__(self, env):
@@ -36,18 +39,18 @@ class DQN:
                  tf.truncated_normal([self.input_size, self.HIDDEN1_SIZE], 
                  stddev=0.01), name='W1')
       b1 = tf.Variable(tf.zeros(self.HIDDEN1_SIZE), name='b1')
-      h1 = tf.nn.tanh(tf.matmul(self.x, W1) + b1)
+      h1 = tf.nn.dropout(tf.nn.relu(tf.matmul(self.x, W1) + b1), self.DROPOUT)
     with tf.name_scope('hidden2'):
       W2 = tf.Variable(
                  tf.truncated_normal([self.HIDDEN1_SIZE, self.HIDDEN2_SIZE], 
                  stddev=0.01), name='W2')
       b2 = tf.Variable(tf.zeros(self.HIDDEN2_SIZE), name='b2')
-      h2 = tf.nn.tanh(tf.matmul(h1, W2) + b2)
+      h2 = tf.nn.dropout(tf.nn.relu(tf.matmul(h1, W2) + b2), self.DROPOUT)
     with tf.name_scope('output'):
       W3 = tf.Variable(
                  tf.truncated_normal([self.HIDDEN2_SIZE, self.output_size], 
                  stddev=0.01), name='W3')
-      b3 = tf.Variable(tf.zeros(self.output_size), name='b3')
+      b3 = tf.Variable(tf.fill([self.output_size], 50.0), name='b3')
       self.Q = tf.matmul(h2, W3) + b3
     self.weights = [W1, b1, W2, b2, W3, b3]
 
@@ -59,14 +62,12 @@ class DQN:
                   reduction_indices=[1])
     self.loss = tf.reduce_mean(tf.square(tf.subtract(q_values, self.targetQ)))
 
-    # Reguralization
-    for w in [W1, W2, W3]:
-      self.loss += self.REG_FACTOR * tf.reduce_sum(tf.square(w))
-
     # Training
     optimizer = tf.train.AdamOptimizer(self.LEARNING_RATE)
     global_step = tf.Variable(0, name='global_step', trainable=False)
     self.train_op = optimizer.minimize(self.loss, global_step=global_step)
+
+    self.saver = tf.train.Saver()
 
   def train(self, num_episodes=NUM_EPISODES):
     self.session = tf.Session()
@@ -99,14 +100,14 @@ class DQN:
 
         # Update replay memory
         if done:
-          reward = -100
+            reward = -100
         self.replay_memory.append((state, action, reward, obs, done))
         if len(self.replay_memory) > self.REPLAY_MEMORY_SIZE:
           self.replay_memory.pop(0)
         state = obs
 
         # Sample a random minibatch and fetch max Q at s'
-        if len(self.replay_memory) >= self.MINIBATCH_SIZE:
+        if len(self.replay_memory) >= 10000:
           minibatch = random.sample(self.replay_memory, self.MINIBATCH_SIZE)
           next_states = [m[3] for m in minibatch]
           # TODO: Optimize to skip terminal states
@@ -138,6 +139,10 @@ class DQN:
           # Write summary for TensorBoard
           if total_steps % 100 == 0:
             self.summary_writer.add_summary(summary, total_steps)
+          
+        # Update target network
+        if step % self.TARGET_UPDATE_FREQ == 0:
+            target_weights = self.session.run(self.weights)
 
         total_steps += 1
         steps += 1
@@ -146,12 +151,10 @@ class DQN:
 
       step_counts.append(steps) 
       mean_steps = np.mean(step_counts[-100:])
-      print("Training episode = {}, Total steps = {}, Last-100 mean steps = {}"
-                                      .format(episode, total_steps, mean_steps))
+      print("Training episode = {}, Total steps = {}, Last-100 mean steps = {}, epsilon: {}"
+                                      .format(episode, total_steps, mean_steps, self.random_action_prob))
 
-      # Update target network
-      if episode % self.TARGET_UPDATE_FREQ == 0:
-        target_weights = self.session.run(self.weights)
+      
 
   def update_random_action_prob(self):
     self.random_action_prob *= self.RANDOM_ACTION_DECAY
@@ -162,9 +165,11 @@ class DQN:
     state = self.env.reset()
     done = False
     steps = 0
-    while not done and steps < 200:
+    while not done and steps < 1000:
       self.env.render()
       q_values = self.session.run(self.Q, feed_dict={self.x: [state]})
+      print q_values
+      time.sleep(0.5)
       action = q_values.argmax()
       state, _, done, _ = self.env.step(action)
       steps += 1
@@ -175,6 +180,8 @@ if __name__ == '__main__':
   dqn.init_network()
 
   dqn.train()
+  save_path = dqn.saver.save(self.session, "/tmp/dqnmodel.ckpt")
+  print("Model saved in file: %s" % save_path)
 
   res = []
   for i in range(100):
