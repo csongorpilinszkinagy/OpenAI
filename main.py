@@ -8,11 +8,11 @@ import time
 
 class DQN:
   REPLAY_MEMORY_SIZE = 1000000
-  RANDOM_ACTION_DECAY = 0.99999
+  RANDOM_ACTION_DECAY = 0.999995
   MIN_RANDOM_ACTION_PROB = 0.1
-  HIDDEN1_SIZE = 20
-  HIDDEN2_SIZE = 20
-  NUM_EPISODES = 10000
+  HIDDEN1_SIZE = 32
+  HIDDEN2_SIZE = 32
+  NUM_EPISODES = 30000
   MAX_STEPS = 1000
   LEARNING_RATE = 0.00025
   MINIBATCH_SIZE = 32
@@ -30,27 +30,59 @@ class DQN:
     assert len(self.env.observation_space.shape) == 1
     self.input_size = self.env.observation_space.shape[0]
     self.output_size = self.env.action_space.n
-    
+
+  def weight_variable(shape):
+    initial = tf.truncated_normal(shape, stddev=0.1)
+    return tf.Variable(initial)
+
+  def bias_variable(shape):
+    initial = tf.constant(0.1, shape=shape)
+    return tf.Variable(initial)
+
+  def variable_summaries(var):
+    with tf.name_scope("summaries"):
+      mean = tf.reduce_mean(var)
+      tf.summary.scalar("mean", mean)
+      with tf.name_scope("stddev"):
+        stddev = tf.sqrt(tf.reduce_mean(tf.square(var-mean)))
+      tf.summary.scalar("stddev", stddev)
+      tf.summary.scalar("min", tf.reduce_min(var))
+      tf.summary.scalar("max", tf.reduce_max(var))
+      tf.summary.histogram("histogram", var)
+
+  def nn_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
+    with name_scope(layer_name):
+      with tf.name_scope("weights"):
+        weights = weight_variable([input_dim, output_dim])
+        variable_summaries(weights)
+      with tf.name_scope("biases"):
+        biases = bias_variable([output_dim])
+        variable_summaries(biases)
+      with tf.name_scope("Wx_plus_b"):
+        preactivate = tf.matmul(input_tensor, weights) + biases
+        tf.summary.histogram("pre_activations", preactivate)
+      activations = act(preactivate, name="activation")
+      tf.summary.histogram("activations", activations)
+      return activations
+  
+  #hidden1 = nn_layer(x, INPUT_SIZE, HIDDEN1_SIZE, "layer1")
+
+
   def init_network(self):
+    self.session = tf.Session()
     # Inference
     self.x = tf.placeholder(tf.float32, [None, self.input_size])
     with tf.name_scope('hidden1'):
-      W1 = tf.Variable(
-                 tf.truncated_normal([self.input_size, self.HIDDEN1_SIZE], 
-                 stddev=0.01), name='W1')
+      W1 = tf.Variable(tf.truncated_normal([self.input_size, self.HIDDEN1_SIZE], stddev=0.01), name='W1')
       b1 = tf.Variable(tf.zeros(self.HIDDEN1_SIZE), name='b1')
-      h1 = tf.nn.dropout(tf.nn.relu(tf.matmul(self.x, W1) + b1), self.DROPOUT)
+      h1 = tf.nn.relu(tf.matmul(self.x, W1) + b1)
     with tf.name_scope('hidden2'):
-      W2 = tf.Variable(
-                 tf.truncated_normal([self.HIDDEN1_SIZE, self.HIDDEN2_SIZE], 
-                 stddev=0.01), name='W2')
+      W2 = tf.Variable(tf.truncated_normal([self.HIDDEN1_SIZE, self.HIDDEN2_SIZE],stddev=0.01), name='W2')
       b2 = tf.Variable(tf.zeros(self.HIDDEN2_SIZE), name='b2')
-      h2 = tf.nn.dropout(tf.nn.relu(tf.matmul(h1, W2) + b2), self.DROPOUT)
+      h2 = tf.nn.relu(tf.matmul(h1, W2) + b2)
     with tf.name_scope('output'):
-      W3 = tf.Variable(
-                 tf.truncated_normal([self.HIDDEN2_SIZE, self.output_size], 
-                 stddev=0.01), name='W3')
-      b3 = tf.Variable(tf.fill([self.output_size], 50.0), name='b3')
+      W3 = tf.Variable(tf.truncated_normal([self.HIDDEN2_SIZE, self.output_size], stddev=0.01), name='W3')
+      b3 = tf.Variable(tf.fill([self.output_size], 0.0), name='b3')
       self.Q = tf.matmul(h2, W3) + b3
     self.weights = [W1, b1, W2, b2, W3, b3]
 
@@ -58,8 +90,7 @@ class DQN:
     self.targetQ = tf.placeholder(tf.float32, [None])
     self.targetActionMask = tf.placeholder(tf.float32, [None, self.output_size])
     # TODO: Optimize this
-    q_values = tf.reduce_sum(tf.multiply(self.Q, self.targetActionMask), 
-                  reduction_indices=[1])
+    q_values = tf.reduce_sum(tf.multiply(self.Q, self.targetActionMask),reduction_indices=[1])
     self.loss = tf.reduce_mean(tf.square(tf.subtract(q_values, self.targetQ)))
 
     # Training
@@ -70,7 +101,6 @@ class DQN:
     self.saver = tf.train.Saver()
 
   def train(self, num_episodes=NUM_EPISODES):
-    self.session = tf.Session()
 
     # Summary for TensorBoard
     tf.summary.scalar('loss', self.loss)
@@ -99,8 +129,6 @@ class DQN:
         obs, reward, done, _ = self.env.step(action)
 
         # Update replay memory
-        if done:
-            reward = -100
         self.replay_memory.append((state, action, reward, obs, done))
         if len(self.replay_memory) > self.REPLAY_MEMORY_SIZE:
           self.replay_memory.pop(0)
@@ -134,14 +162,14 @@ class DQN:
             self.targetActionMask: target_action_mask,
           }
           _, summary = self.session.run([self.train_op, self.summary], 
-                                        feed_dict=feed_dict)
+              feed_dict=feed_dict)
 
           # Write summary for TensorBoard
-          if total_steps % 100 == 0:
+          if total_steps % 1000 == 0:
             self.summary_writer.add_summary(summary, total_steps)
-          
-        # Update target network
-        if step % self.TARGET_UPDATE_FREQ == 0:
+
+          # Update target network
+          if step % self.TARGET_UPDATE_FREQ == 0:
             target_weights = self.session.run(self.weights)
 
         total_steps += 1
@@ -152,9 +180,11 @@ class DQN:
       step_counts.append(steps) 
       mean_steps = np.mean(step_counts[-100:])
       print("Training episode = {}, Total steps = {}, Last-100 mean steps = {}, epsilon: {}"
-                                      .format(episode, total_steps, mean_steps, self.random_action_prob))
+        .format(episode, total_steps, mean_steps, self.random_action_prob))
+      if mean_steps > 195.0:
+        break
 
-      
+
 
   def update_random_action_prob(self):
     self.random_action_prob *= self.RANDOM_ACTION_DECAY
@@ -168,19 +198,17 @@ class DQN:
     while not done and steps < 1000:
       self.env.render()
       q_values = self.session.run(self.Q, feed_dict={self.x: [state]})
-      print q_values
-      time.sleep(0.5)
       action = q_values.argmax()
       state, _, done, _ = self.env.step(action)
       steps += 1
     return steps
 
-if __name__ == '__main__':
+if __name__ == "__main__":
   dqn = DQN('CartPole-v0')
   dqn.init_network()
 
   dqn.train()
-  save_path = dqn.saver.save(self.session, "/tmp/dqnmodel.ckpt")
+  save_path = dqn.saver.save(dqn.session, "/tmp/dqnmodel.ckpt")
   print("Model saved in file: %s" % save_path)
 
   res = []
