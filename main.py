@@ -181,8 +181,6 @@ class DQN:
       mean_steps = np.mean(step_counts[-100:])
       print("Training episode = {}, Total steps = {}, Last-100 mean steps = {}, epsilon: {}"
         .format(episode, total_steps, mean_steps, self.random_action_prob))
-      if mean_steps > 195.0:
-        break
 
 
 
