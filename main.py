@@ -9,7 +9,8 @@ import time
 class DQN:
   REPLAY_MEMORY_SIZE = 1000000
   RANDOM_ACTION_DECAY = 0.999995
-  MIN_RANDOM_ACTION_PROB = 0.1
+  EPSILON_MIN = 0.1
+  EPSILON_MAX = 1.0
   HIDDEN1_SIZE = 32
   HIDDEN2_SIZE = 32
   NUM_EPISODES = 30000
@@ -21,8 +22,11 @@ class DQN:
   REG_FACTOR = 0.001
   LOG_DIR = '/tmp/dqn'
   DROPOUT = 0.9
+  START_UPDATE_AT = 10000
+  END_UPDATE_AT = 50000
+  END_AT_TOTAL_STEPS = 100000
 
-  random_action_prob = 1.0
+  random_action_prob = EPSILON_MAX
   replay_memory = []
 
   def __init__(self, env):
@@ -125,7 +129,7 @@ class DQN:
         else:
           q_values = self.session.run(self.Q, feed_dict={self.x: [state]})
           action = q_values.argmax()
-        self.update_random_action_prob()
+        self.random_action_prob = self.update_epsilon(total_steps, self.START_UPDATE_AT, self.EPSILON_MAX, self.END_UPDATE_AT, self.EPSILON_MIN)
         obs, reward, done, _ = self.env.step(action)
 
         # Update replay memory
@@ -182,12 +186,16 @@ class DQN:
       print("Training episode = {}, Total steps = {}, Last-100 mean steps = {}, epsilon: {}"
         .format(episode, total_steps, mean_steps, self.random_action_prob))
 
+      if total_steps > self.END_AT_TOTAL_STEPS:
+        break
 
 
-  def update_random_action_prob(self):
-    self.random_action_prob *= self.RANDOM_ACTION_DECAY
-    if self.random_action_prob < self.MIN_RANDOM_ACTION_PROB:
-      self.random_action_prob = self.MIN_RANDOM_ACTION_PROB
+  def update_epsilon(self, total_steps, start_at, start_value, end_at, end_value):
+    if total_steps < start_at:
+      return start_value
+    if total_steps > end_at:
+      return end_value
+    return start_value + (end_value - start_value) / (end_at - start_at) * (total_steps - start_at)
 
   def play(self):
     state = self.env.reset()
