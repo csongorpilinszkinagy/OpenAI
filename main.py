@@ -35,15 +35,13 @@ class DQN:
     self.input_size = self.env.observation_space.shape[0]
     self.output_size = self.env.action_space.n
 
-  def weight_variable(shape):
-    initial = tf.truncated_normal(shape, stddev=0.1)
-    return tf.Variable(initial)
+  def weight_variable(self, shape):
+    return tf.Variable(tf.truncated_normal(shape, stddev=0.1))
 
-  def bias_variable(shape):
-    initial = tf.constant(0.1, shape=shape)
-    return tf.Variable(initial)
+  def bias_variable(self, shape):
+    return tf.Variable(tf.constant(0.1, shape=shape))
 
-  def variable_summaries(var):
+  def variable_summaries(self, var):
     with tf.name_scope("summaries"):
       mean = tf.reduce_mean(var)
       tf.summary.scalar("mean", mean)
@@ -54,41 +52,36 @@ class DQN:
       tf.summary.scalar("max", tf.reduce_max(var))
       tf.summary.histogram("histogram", var)
 
-  def nn_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
-    with name_scope(layer_name):
+  def nn_layer(self, input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
+    with tf.name_scope(layer_name):
       with tf.name_scope("weights"):
-        weights = weight_variable([input_dim, output_dim])
-        variable_summaries(weights)
+        weights = self.weight_variable([input_dim, output_dim])
+        self.variable_summaries(weights)
       with tf.name_scope("biases"):
-        biases = bias_variable([output_dim])
-        variable_summaries(biases)
+        biases = self.bias_variable([output_dim])
+        self.variable_summaries(biases)
       with tf.name_scope("Wx_plus_b"):
         preactivate = tf.matmul(input_tensor, weights) + biases
         tf.summary.histogram("pre_activations", preactivate)
       activations = act(preactivate, name="activation")
       tf.summary.histogram("activations", activations)
       return activations
-  
-  #hidden1 = nn_layer(x, INPUT_SIZE, HIDDEN1_SIZE, "layer1")
 
 
   def init_network(self):
     self.session = tf.Session()
     # Inference
     self.x = tf.placeholder(tf.float32, [None, self.input_size])
-    with tf.name_scope('hidden1'):
-      W1 = tf.Variable(tf.truncated_normal([self.input_size, self.HIDDEN1_SIZE], stddev=0.01), name='W1')
-      b1 = tf.Variable(tf.zeros(self.HIDDEN1_SIZE), name='b1')
-      h1 = tf.nn.relu(tf.matmul(self.x, W1) + b1)
+    hidden1 = self.nn_layer(self.x, self.input_size, self.HIDDEN1_SIZE, "hidden1")
     with tf.name_scope('hidden2'):
       W2 = tf.Variable(tf.truncated_normal([self.HIDDEN1_SIZE, self.HIDDEN2_SIZE],stddev=0.01), name='W2')
       b2 = tf.Variable(tf.zeros(self.HIDDEN2_SIZE), name='b2')
-      h2 = tf.nn.relu(tf.matmul(h1, W2) + b2)
+      h2 = tf.nn.relu(tf.matmul(hidden1, W2) + b2)
     with tf.name_scope('output'):
       W3 = tf.Variable(tf.truncated_normal([self.HIDDEN2_SIZE, self.output_size], stddev=0.01), name='W3')
       b3 = tf.Variable(tf.fill([self.output_size], 0.0), name='b3')
       self.Q = tf.matmul(h2, W3) + b3
-    self.weights = [W1, b1, W2, b2, W3, b3]
+    self.weights = [W2, b2, W3, b3]
 
     # Loss
     self.targetQ = tf.placeholder(tf.float32, [None])
