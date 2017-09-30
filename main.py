@@ -6,6 +6,38 @@ import tensorflow as tf
 
 import time
 
+def weight_variable(shape):
+    return tf.Variable(tf.truncated_normal(shape, stddev=0.1))
+
+def bias_variable(shape):
+  return tf.Variable(tf.constant(0.1, shape=shape))
+
+def variable_summaries(var):
+  with tf.name_scope("summaries"):
+    mean = tf.reduce_mean(var)
+    tf.summary.scalar("mean", mean)
+    with tf.name_scope("stddev"):
+      stddev = tf.sqrt(tf.reduce_mean(tf.square(var-mean)))
+    tf.summary.scalar("stddev", stddev)
+    tf.summary.scalar("min", tf.reduce_min(var))
+    tf.summary.scalar("max", tf.reduce_max(var))
+    tf.summary.histogram("histogram", var)
+
+def nn_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
+  with tf.name_scope(layer_name):
+    with tf.name_scope("weights"):
+      weights = weight_variable([input_dim, output_dim])
+      variable_summaries(weights)
+    with tf.name_scope("biases"):
+      biases = bias_variable([output_dim])
+      variable_summaries(biases)
+    with tf.name_scope("Wx_plus_b"):
+      preactivate = tf.matmul(input_tensor, weights) + biases
+      tf.summary.histogram("pre_activations", preactivate)
+    activations = act(preactivate, name="activation")
+    tf.summary.histogram("activations", activations)
+    return activations, weights, biases
+
 class DQN:
   REPLAY_MEMORY_SIZE = 1000000
   RANDOM_ACTION_DECAY = 0.999995
@@ -35,47 +67,14 @@ class DQN:
     self.input_size = self.env.observation_space.shape[0]
     self.output_size = self.env.action_space.n
 
-  def weight_variable(self, shape):
-    return tf.Variable(tf.truncated_normal(shape, stddev=0.1))
-
-  def bias_variable(self, shape):
-    return tf.Variable(tf.constant(0.1, shape=shape))
-
-  def variable_summaries(self, var):
-    with tf.name_scope("summaries"):
-      mean = tf.reduce_mean(var)
-      tf.summary.scalar("mean", mean)
-      with tf.name_scope("stddev"):
-        stddev = tf.sqrt(tf.reduce_mean(tf.square(var-mean)))
-      tf.summary.scalar("stddev", stddev)
-      tf.summary.scalar("min", tf.reduce_min(var))
-      tf.summary.scalar("max", tf.reduce_max(var))
-      tf.summary.histogram("histogram", var)
-
-  def nn_layer(self, input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
-    with tf.name_scope(layer_name):
-      with tf.name_scope("weights"):
-        weights = self.weight_variable([input_dim, output_dim])
-        self.variable_summaries(weights)
-      with tf.name_scope("biases"):
-        biases = self.bias_variable([output_dim])
-        self.variable_summaries(biases)
-      with tf.name_scope("Wx_plus_b"):
-        preactivate = tf.matmul(input_tensor, weights) + biases
-        tf.summary.histogram("pre_activations", preactivate)
-      activations = act(preactivate, name="activation")
-      tf.summary.histogram("activations", activations)
-      return activations
-
-
   def init_network(self):
     self.session = tf.Session()
     # Inference
     self.x = tf.placeholder(tf.float32, [None, self.input_size])
-    hidden1 = self.nn_layer(self.x, self.input_size, self.HIDDEN1_SIZE, "hidden1")
-    hidden2 = self.nn_layer(hidden1, self.HIDDEN1_SIZE, self.HIDDEN2_SIZE, "hidden2")
-    self.Q = self.nn_layer(hidden2, self.HIDDEN2_SIZE, self.output_size, "output", act=tf.identity)
-    self.weights = []
+    hidden1, W1, b1 = nn_layer(self.x, self.input_size, self.HIDDEN1_SIZE, "hidden1")
+    hidden2, W2, b2 = nn_layer(hidden1, self.HIDDEN1_SIZE, self.HIDDEN2_SIZE, "hidden2")
+    self.Q, W3, b3 = nn_layer(hidden2, self.HIDDEN2_SIZE, self.output_size, "output", act=tf.identity)
+    self.weights = [W1, b1, W2, b2, W3, b3]
 
     # Loss
     self.targetQ = tf.placeholder(tf.float32, [None])
