@@ -74,11 +74,8 @@ class DQN:
     self.x = tf.placeholder(tf.float32, [None, self.input_size])
     hidden1 = self.nn_layer(self.x, self.input_size, self.HIDDEN1_SIZE, "hidden1")
     hidden2 = self.nn_layer(hidden1, self.HIDDEN1_SIZE, self.HIDDEN2_SIZE, "hidden2")
-    with tf.name_scope('output'):
-      W3 = tf.Variable(tf.truncated_normal([self.HIDDEN2_SIZE, self.output_size], stddev=0.01), name='W3')
-      b3 = tf.Variable(tf.fill([self.output_size], 0.0), name='b3')
-      self.Q = tf.matmul(hidden2, W3) + b3
-    self.weights = [W3, b3]
+    self.Q = self.nn_layer(hidden2, self.HIDDEN2_SIZE, self.output_size, "output", act=tf.identity)
+    self.weights = []
 
     # Loss
     self.targetQ = tf.placeholder(tf.float32, [None])
