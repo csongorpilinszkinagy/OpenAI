@@ -95,25 +95,25 @@ def train():
     h_conv3 = tf.nn.relu(conv2d(h_conv2, W_conv3, 1) + b_conv3)
 
   with tf.name_scope("flatten"):
-    flat_conv3 = tf.reshape(h_conv3, [-1])
+    flat_conv3 = tf.reshape(h_conv3, [-1, 7744])
 
-  # hidden1, W1, b1 = nn_layer(state, input_size, HIDDEN_SIZE_1, "hidden1")
-  # hidden2, W2, b2 = nn_layer(hidden1, HIDDEN_SIZE_1, HIDDEN_SIZE_2, "hidden2")
-  # Q, W3, b3 = nn_layer(hidden2, HIDDEN_SIZE_2, output_size, "output_q", act=tf.identity)
-  # weights = [W1, b1, W2, b2, W3, b3]
+  hidden1, W1, b1 = nn_layer(flat_conv3, 7744, HIDDEN_SIZE_1, "hidden1")
+  hidden2, W2, b2 = nn_layer(hidden1, HIDDEN_SIZE_1, HIDDEN_SIZE_2, "hidden2")
+  Q, W3, b3 = nn_layer(hidden2, HIDDEN_SIZE_2, output_size, "output_q", act=tf.identity)
+  weights = [W1, b1, W2, b2, W3, b3]
 
   s = environment.reset()
   s = tf.image.resize_images(s, [84, 84]).eval()
 
   
+  with tf.name_scope("Q_learning"):
+    targetQ = tf.placeholder(tf.float32, [None], name="targetQ")
+    tf.summary.scalar("targetQ", targetQ)
 
-  targetQ = tf.placeholder(tf.float32, [None], name="targetQ")
-  tf.summary.scalar("targetQ", targetQ)
-
-  targetActionMask = tf.placeholder(tf.float32, [None, output_size], name="targetActionMask")
-  maskedQ = tf.reduce_sum(tf.multiply(Q, targetActionMask), reduction_indices=[1], name="maskedQ")
-  tf.summary.scalar("maskedQ", maskedQ)
-  loss = tf.reduce_mean(tf.square(tf.subtract(maskedQ, targetQ)), name="loss")
+    targetActionMask = tf.placeholder(tf.float32, [None, output_size], name="targetActionMask")
+    maskedQ = tf.reduce_sum(tf.multiply(Q, targetActionMask), reduction_indices=[1], name="maskedQ")
+    tf.summary.scalar("maskedQ", maskedQ)
+    loss = tf.reduce_mean(tf.square(tf.subtract(maskedQ, targetQ)), name="loss")
 
   optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
   train_op = optimizer.minimize(loss)
@@ -164,7 +164,7 @@ def train():
       if total_steps > MINIMUM_SAMPLE_SIZE:
         minibatch = random.sample(replay_memory, MINIBATCH_SIZE)
         next_states = [m[3] for m in minibatch]
-        feed_dict = {input_state: next_states}
+        feed_dict = {state: next_states}
         feed_dict.update(zip(weights, target_weights))
         q_values = session.run(Q, feed_dict=feed_dict)
         max_q_values = q_values.max(axis=1)
