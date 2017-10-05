@@ -9,7 +9,7 @@ EPSILON_MIN = 0.1
 EPSILON_MAX = 1.0
 HIDDEN_SIZE_1 = 32
 HIDDEN_SIZE_2 = 32
-NUM_EPISODES = 100000
+NUMBER_OF_EPISODES = 100000
 MAX_STEPS = 1000
 LEARNING_RATE = 0.00025
 MINIBATCH_SIZE = 32
@@ -21,12 +21,19 @@ DROPOUT = 0.9
 START_UPDATE_AT = 10000
 END_UPDATE_AT = 100000
 END_AT_TOTAL_STEPS = 2000000
+MINIMUM_SAMPLE_SIZE = 10000
+
+# Create session
+session = tf.InteractiveSession()
 
 def weight_variable(shape):
     return tf.Variable(tf.truncated_normal(shape, stddev=0.1))
 
 def bias_variable(shape):
   return tf.Variable(tf.constant(0.1, shape=shape))
+
+def conv2d(x, W, stride):
+    return tf.nn.conv2d(x, W, strides = [1, stride, stride, 1], padding = "SAME")
 
 def variable_summaries(var):
   with tf.name_scope("summaries"):
@@ -54,28 +61,58 @@ def nn_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
     tf.summary.histogram("activations", activations)
     return activations, weights, biases
 
-def train():
-  # Create session
-  session = tf.InteractiveSession()
+def update_epsilon(total_steps):
+  if total_steps < START_UPDATE_AT:
+    return EPSILON_MAX
+  if total_steps > END_UPDATE_AT:
+    return EPSILON_MIN
+  return EPSILON_MAX + (EPSILON_MIN - EPSILON_MAX) / (END_UPDATE_AT - START_UPDATE_AT) * (total_steps - START_UPDATE_AT)
 
+def train():
   # TODO: Load if there is a model present
 
   # Create environment
-  environment = gym.make("CartPole-v0")
+  environment = gym.make("Breakout-v0")
   input_size = environment.observation_space.shape[0]
   output_size = environment.action_space.n
 
   # Create model
-  input_state = tf.placeholder(tf.float32, [None, input_size], name="input_state")
-  hidden1, W1, b1 = nn_layer(input_state, input_size, HIDDEN_SIZE_1, "hidden1")
-  hidden2, W2, b2 = nn_layer(hidden1, HIDDEN_SIZE_1, HIDDEN_SIZE_2, "hidden2")
-  Q, W3, b3 = nn_layer(hidden2, HIDDEN_SIZE_2, output_size, "output_q", act=tf.identity)
-  weights = [W1, b1, W2, b2, W3, b3]
+  state = tf.placeholder(tf.float32, [None, 84, 84, 4], name="state")
 
+  with tf.name_scope("conv1"):
+    W_conv1 = weight_variable([8, 8, 4, 32])
+    b_conv1 = bias_variable([32])
+    h_conv1 = tf.nn.relu(conv2d(state, W_conv1, 4) + b_conv1)
+  
+  with tf.name_scope("conv2"):
+    W_conv2 = weight_variable([4, 4, 32, 64])
+    b_conv2 = bias_variable([64])
+    h_conv2 = tf.nn.relu(conv2d(h_conv1, W_conv2, 2) + b_conv2)
+  
+  with tf.name_scope("conv3"):
+    W_conv3 = weight_variable([3, 3, 64, 64])
+    b_conv3 = bias_variable([64])
+    h_conv3 = tf.nn.relu(conv2d(h_conv2, W_conv3, 1) + b_conv3)
+
+  with tf.name_scope("flatten"):
+    flat_conv3 = tf.reshape(h_conv3, [-1])
+
+  # hidden1, W1, b1 = nn_layer(state, input_size, HIDDEN_SIZE_1, "hidden1")
+  # hidden2, W2, b2 = nn_layer(hidden1, HIDDEN_SIZE_1, HIDDEN_SIZE_2, "hidden2")
+  # Q, W3, b3 = nn_layer(hidden2, HIDDEN_SIZE_2, output_size, "output_q", act=tf.identity)
+  # weights = [W1, b1, W2, b2, W3, b3]
+
+  s = environment.reset()
+  s = tf.image.resize_images(s, [84, 84]).eval()
+
+  
 
   targetQ = tf.placeholder(tf.float32, [None], name="targetQ")
+  tf.summary.scalar("targetQ", targetQ)
+
   targetActionMask = tf.placeholder(tf.float32, [None, output_size], name="targetActionMask")
   maskedQ = tf.reduce_sum(tf.multiply(Q, targetActionMask), reduction_indices=[1], name="maskedQ")
+  tf.summary.scalar("maskedQ", maskedQ)
   loss = tf.reduce_mean(tf.square(tf.subtract(maskedQ, targetQ)), name="loss")
 
   optimizer = tf.train.AdamOptimizer(LEARNING_RATE)
@@ -87,81 +124,50 @@ def train():
 
   # Write summary
   summary_writer = tf.summary.FileWriter(LOG_DIR, session.graph)
-  state = environment.reset()
-  summary = session.run(merged, feed_dict={input_state: [state], targetQ: [20.0], targetActionMask: [[0.0, 1.0]]})
-  summary_writer.add_summary(summary, 0)
 
+  epsilon = EPSILON_MAX
+  replay_memory = []
 
+  model_saver = tf.train.Saver()
 
+  total_steps = 0
 
-# class DQN:
+  target_weights = session.run(weights)
+  
+  # Run episodes
+  for episode in range(NUMBER_OF_EPISODES):
+    # Reset environment
+    state = environment.reset()
+    # Take steps
+    for step in range(MAX_STEPS):
+      # Pick the next action and execute it
+      action = None
+      epsilon = update_epsilon(total_steps)
+      if random.random() < epsilon:
+        action = environment.action_space.sample()
+      else:
+        q_values = session.run(Q, feed_dict={input_state: [state]})
+        action = q_values.argmax()
 
-#   random_action_prob = EPSILON_MAX
-#   replay_memory = []
+      # Observation
+      observation, reward, done, _ = environment.step(action)
+      total_steps += 1
 
-#   def __init__(self, env):
-#     self.env = gym.make(env)
-#     assert len(self.env.observation_space.shape) == 1
-#     self.input_size = self.env.observation_space.shape[0]
-#     self.output_size = self.env.action_space.n
+      # Update replay memory
+      replay_memory.append((state, action, reward, observation, done))
+      if total_steps > REPLAY_MEMORY_SIZE:
+        replay_memory.pop(0)
+      
+      state = observation
 
-#   def init_network(self):
-#     self.session = tf.Session()
-
-
-#     self.x = tf.placeholder(tf.float32, [None, self.input_size])
-#     hidden1, W1, b1 = nn_layer(self.x, self.input_size, self.HIDDEN1_SIZE, "hidden1")
-#     hidden2, W2, b2 = nn_layer(hidden1, self.HIDDEN1_SIZE, self.HIDDEN2_SIZE, "hidden2")
-#     self.Q, W3, b3 = nn_layer(hidden2, self.HIDDEN2_SIZE, self.output_size, "output", act=tf.identity)
-#     self.weights = [W1, b1, W2, b2, W3, b3]
-
-#     # Loss
-#     self.targetQ = tf.placeholder(tf.float32, [None], name="targetQ")
-#     self.targetActionMask = tf.placeholder(tf.float32, [None, self.output_size], name="targetActionMask")
-#     # TODO: Optimize this
-#     q_values = tf.reduce_sum(tf.multiply(self.Q, self.targetActionMask),reduction_indices=[1])
-#     self.loss = tf.reduce_mean(tf.square(tf.subtract(q_values, self.targetQ)))
-
-#     # Training
-#     optimizer = tf.train.AdamOptimizer(self.LEARNING_RATE)
-#     global_step = tf.Variable(0, name='global_step', trainable=False)
-#     self.train_op = optimizer.minimize(self.loss, global_step=global_step)
-
-#     self.saver = tf.train.Saver()
-
-#   def train(self, num_episodes=NUM_EPISODES):
-
-#     # Summary for TensorBoard
-#     tf.summary.scalar('loss', self.loss)
-#     tf.summary.histogram('Q_values', self.Q)
-#     self.summary = tf.summary.merge_all()
-#     self.summary_writer = tf.summary.FileWriter(self.LOG_DIR, self.session.graph)
-
-#     self.session.run(tf.global_variables_initializer())
-#     total_steps = 0
-#     step_counts = []
-
-#     target_weights = self.session.run(self.weights)
-#     for episode in range(num_episodes):
-#       state = self.env.reset()
-#       steps = 0
-
-#       for step in range(self.MAX_STEPS):
-#         # Pick the next action and execute it
-#         action = None
-#         if random.random() < self.random_action_prob:
-#           action = self.env.action_space.sample()
-#         else:
-#           q_values = self.session.run(self.Q, feed_dict={self.x: [state]})
-#           action = q_values.argmax()
-#         self.random_action_prob = self.update_epsilon(total_steps, self.START_UPDATE_AT, self.EPSILON_MAX, self.END_UPDATE_AT, self.EPSILON_MIN)
-#         obs, reward, done, _ = self.env.step(action)
-
-#         # Update replay memory
-#         self.replay_memory.append((state, action, reward, obs, done))
-#         if len(self.replay_memory) > self.REPLAY_MEMORY_SIZE:
-#           self.replay_memory.pop(0)
-#         state = obs
+      # Sample a random minibatch
+      if total_steps > MINIMUM_SAMPLE_SIZE:
+        minibatch = random.sample(replay_memory, MINIBATCH_SIZE)
+        next_states = [m[3] for m in minibatch]
+        feed_dict = {input_state: next_states}
+        feed_dict.update(zip(weights, target_weights))
+        q_values = session.run(Q, feed_dict=feed_dict)
+        max_q_values = q_values.max(axis=1)
 
 #         # Sample a random minibatch and fetch max Q at s'
 #         if len(self.replay_memory) >= 10000:
@@ -215,12 +221,7 @@ def train():
 #         break
 
 
-#   def update_epsilon(self, total_steps, start_at, start_value, end_at, end_value):
-#     if total_steps < start_at:
-#       return start_value
-#     if total_steps > end_at:
-#       return end_value
-#     return start_value + (end_value - start_value) / (end_at - start_at) * (total_steps - start_at)
+#   
 
 #   def play(self):
 #     state = self.env.reset()
