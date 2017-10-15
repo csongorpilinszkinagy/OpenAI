@@ -212,7 +212,7 @@ def train(config):
   tf.global_variables_initializer().run()
 
   # Summary writer and model saver
-  summary_writer = tf.summary.FileWriter(SUMMARY_PATH, session.graph)
+  #summary_writer = tf.summary.FileWriter(SUMMARY_PATH, session.graph)
   #model_saver = tf.train.Saver()
 
   # TODO: if there is a model load it
