@@ -82,6 +82,9 @@ def train(config):
     resized_image = tf.image.resize_images(gray_image, [RESIZED_IMAGE_SIZE, RESIZED_IMAGE_SIZE], method=tf.image.ResizeMethod.AREA)
     normalized_image = tf.squeeze(resized_image)
 
+    # TODO: figure out why it isn't working and expects a 210, 160, 3 image
+    # tf.summary.image("normalized_image", [resized_image], 10)
+
   
 
 
