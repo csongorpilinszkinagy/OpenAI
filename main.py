@@ -34,41 +34,8 @@ MINIMUM_SAMPLE_SIZE = 10000
 
 RESIZED_IMAGE_SIZE = 32
 
-def weight_variable(shape):
-  return tf.Variable(tf.truncated_normal(shape))
-def bias_variable(shape):
-  return tf.Variable(tf.constant(0.1, shape=shape))
-
 def conv2d(x, W, stride):
     return tf.nn.conv2d(x, W, strides = [1, stride, stride, 1], padding = "SAME")
-
-def variable_summaries(var):
-  with tf.name_scope("summaries"):
-    mean = tf.reduce_mean(var)
-    tf.summary.scalar("mean", mean)
-    with tf.name_scope("stddev"):
-      stddev = tf.sqrt(tf.reduce_mean(tf.square(var-mean)))
-    tf.summary.scalar("stddev", stddev)
-    tf.summary.scalar("min", tf.reduce_min(var))
-    tf.summary.scalar("max", tf.reduce_max(var))
-    tf.summary.histogram("histogram", var)
-
-def nn_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
-  with tf.name_scope(layer_name):
-    with tf.name_scope("weights"):
-      weights = weight_variable([input_dim, output_dim])
-      variable_summaries(weights)
-    with tf.name_scope("biases"):
-      biases = bias_variable([output_dim])
-      variable_summaries(biases)
-    with tf.name_scope("Wx_plus_b"):
-      preactivate = tf.matmul(input_tensor, weights) + biases
-      tf.summary.histogram("pre_activations", preactivate)
-DIR = os.path.dirname(os.path.realpath(__file__))
-NAME = "egreedy"
-NUMBER = 1
-MODEL_PATH = DIR + "/models/" + NAME + "/" + str(NUMBER) + "/model.ckpt"
-SUMMARY_PATH = DIR + "/summaries/" + NAME + "/" + str(NUMBER)
 
 def update_epsilon(total_steps):
   if total_steps < START_UPDATE_AT:
