@@ -31,6 +31,9 @@ DISCOUNT_FACTOR = 0.99
 TARGET_UPDATE_FREQ = 10000
 MINIMUM_SAMPLE_SIZE = 10000
 
+
+RESIZED_IMAGE_SIZE = 32
+
 def weight_variable(shape):
   return tf.Variable(tf.truncated_normal(shape))
 def bias_variable(shape):
