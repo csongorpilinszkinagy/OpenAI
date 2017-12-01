@@ -21,19 +21,19 @@ import os
 # Std 1.307
 
 
-REPLAY_MEMORY_SIZE = 100000
-EPSILON_MIN = 0.1
-EPSILON_MAX = 0.1
+REPLAY_MEMORY_SIZE = 1000000
+EPSILON_MIN = 0.01
+EPSILON_MAX = 1.0
 NUMBER_OF_EPISODES = 1000000
 END_AT_TOTAL_STEPS = 10000000
 START_UPDATE_AT = 10000
-END_UPDATE_AT = 500000
+END_UPDATE_AT = 20000
 MAX_STEPS = 10000
 LEARNING_RATE = 0.001
 MINIBATCH_SIZE = 32
 DISCOUNT_FACTOR = 0.99
 TARGET_UPDATE_FREQ = 10000
-MINIMUM_SAMPLE_SIZE = 90000
+MINIMUM_SAMPLE_SIZE = 10000
 
 
 RESIZED_IMAGE_SIZE = 32
@@ -204,7 +204,7 @@ def train(config, summary_dir):
   model_saver = tf.train.Saver()
 
   # TODO: if there is a model load it
-  model_saver.restore(session, "/tmp/tensorboard/model-13.ckpt")
+  model_saver.restore(session, "/tmp/tensorboard/model-0.ckpt")
   print("Model restored")
 
   epsilon = EPSILON_MAX
@@ -227,16 +227,18 @@ def train(config, summary_dir):
 
     # Take steps
     for step in range(MAX_STEPS):
-      if total_steps > MINIMUM_SAMPLE_SIZE:
-        environment.render()
+      environment.render()
       # Pick the next action and execute it
       action = None
-      epsilon = update_epsilon(total_steps)
+      epsilon = 0.0
       if random.random() < epsilon:
         action = environment.action_space.sample()
       else:
         q_values = session.run(Q, feed_dict={input_state: [state]})
+        print(q_values)
+        raw_input("Press Enter to continue...")
         action = q_values.argmax()
+        print(action)
 
       image, reward, done, _ = environment.step(action)
       rewards += reward
@@ -245,66 +247,7 @@ def train(config, summary_dir):
       image_array.pop(0)
       observation = np.stack(image_array, axis=2)
 
-      total_steps += 1
-      if total_steps % 1000 == 0:
-        print(total_steps)
-
-      # Update replay memory
-      if total_steps < REPLAY_MEMORY_SIZE:
-        replay_memory.append((state, action, reward, observation, done))
-      # if total_steps > REPLAY_MEMORY_SIZE:
-      #   replay_memory.pop(0)
-      
       state = observation
-
-      # Sample a random minibatch
-      if total_steps > MINIMUM_SAMPLE_SIZE:
-        #environment.render()
-
-        minibatch = random.sample(replay_memory, MINIBATCH_SIZE)
-        next_states = [m[3] for m in minibatch]
-        feed_dict = {input_state: next_states}
-        feed_dict.update(zip(weights, fixed_weights))
-        q_values = session.run(Q, feed_dict=feed_dict)
-        max_q_values = q_values.max(axis=1)
-
-        # Compute target Q values
-        # TODO: Vectorize computations
-        target_q = np.zeros(MINIBATCH_SIZE)
-        target_action_mask = np.zeros((MINIBATCH_SIZE, output_size), dtype=int)
-        for i in range(MINIBATCH_SIZE):
-          _, action, reward, _, terminal = minibatch[i]
-          target_q[i] = reward
-          # TODO: uncomment
-          if not terminal:
-            target_q[i] += DISCOUNT_FACTOR * max_q_values[i]
-          target_action_mask[i][action] = 1
-
-        # if total_steps < 11000:
-        #   target_q = [1.0] * 32 
-        #   fixed_weights = session.run(weights)
-
-        # Gradient descent
-        states = [m[0] for m in minibatch]
-        feed_dict = {
-          input_state: states, 
-          targetQ: target_q,
-          targetActionMask: target_action_mask,
-        }
-        _, summary = session.run([train_op, merged_summary], feed_dict=feed_dict)
-
-        # Write summary for TensorBoard
-        if total_steps % 1000 == 0:
-          summary_writer.add_summary(summary, total_steps)
-
-        # Update target network
-        if total_steps % 100001 == 0:
-          fixed_weights = session.run(weights)
-        
-        # Save model
-        if total_steps % 10001 == 0:
-          save_path = model_saver.save(session, summary_dir + "/model-" + str(int(np.mean(rewards_array))) + ".ckpt")
-          print("Model saved in file: %s" % save_path)
 
       if done:
         break
@@ -312,7 +255,7 @@ def train(config, summary_dir):
     rewards_array.append(rewards)
     if len(rewards_array) > 100:
       rewards_array.pop(0)
-    print("Epsilon: {}, Mean: {}, Std: {}, Minimum: {}, Maximum: {}".format(epsilon, np.mean(rewards_array), np.std(rewards_array), min(rewards_array), max(rewards_array)))
+    print("Epsilon: {}, Minimum: {}, Mean: {}, Maximum: {}".format(epsilon, min(rewards_array), np.mean(rewards_array), max(rewards_array)))
 
 def play_test():
   env = gym.make("Breakout-v0")
