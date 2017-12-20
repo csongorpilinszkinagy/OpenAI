@@ -14,33 +14,24 @@ import os
 # Min reward 0, Max reward 1
 # Only 1 reward for every hit object
 
-
-# Random play for 1000 episodes
-# Rewards from 0 to 9
-# Mean reward 1.277
-# Std 1.307
-
-
 REPLAY_MEMORY_SIZE = 100000
 EPSILON_MIN = 0.1
-EPSILON_MAX = 0.1
+EPSILON_MAX = 1.0
 NUMBER_OF_EPISODES = 1000000
-END_AT_TOTAL_STEPS = 10000000
+END_AT_TOTAL_STEPS = 2500000
 START_UPDATE_AT = 10000
-END_UPDATE_AT = 500000
+END_UPDATE_AT = 250000
 MAX_STEPS = 10000
 LEARNING_RATE = 0.001
 MINIBATCH_SIZE = 32
 DISCOUNT_FACTOR = 0.99
 TARGET_UPDATE_FREQ = 10000
-MINIMUM_SAMPLE_SIZE = 90000
+MINIMUM_SAMPLE_SIZE = 10000
 
 
 RESIZED_IMAGE_SIZE = 32
 
-def conv2d(x, W, stride):
-    return tf.nn.conv2d(x, W, strides = [1, stride, stride, 1], padding = "SAME")
-
+# Updates the epsilon exploration parameter gradually from EPSILON_MAX to EPSILON_MIN
 def update_epsilon(total_steps):
   if total_steps < START_UPDATE_AT:
     return EPSILON_MAX
@@ -48,44 +39,25 @@ def update_epsilon(total_steps):
     return EPSILON_MIN
   return EPSILON_MAX + (EPSILON_MIN - EPSILON_MAX) / (END_UPDATE_AT - START_UPDATE_AT) * (total_steps - START_UPDATE_AT)
 
+# Creates a 2D convolution layer with input x, variables W, and stride
 def conv2d(x, W, stride):
     return tf.nn.conv2d(x, W, strides = [1, stride, stride, 1], padding = "SAME")
 
+# Creates a leaky ReLU layer with given input
 def leakyRelu(input):
   return tf.maximum(input, 0.1 * input)
 
-def train(config, summary_dir):
-  print("Inside the train function")
-  # Create session
+# Creates and trains the reinforcement learning model, saves the model to model_dir
+def train(model_dir):
+  # Create Tensorflow session
   session = tf.InteractiveSession()
-
-  exploration = False
-  initialization = False
-  parameteralter = False
-
-  if config == "egreedy":
-    exploration = True
-  elif config == "posinit":
-    initialization = True
-  elif config == "egreedyposinit":
-    exploration = True
-    initialization = True
-  elif config == "paramalter":
-    parameteralter = True
-  else:
-    print("No such configuration")
-    return
-
-
-  # TODO: Load if there is a model present
 
   # Create environment
   environment = gym.make("Breakout-v0")
   input_shape = environment.observation_space.shape
   output_size = environment.action_space.n
 
-  print("environment made")
-
+  # image_prep takes the input images and outputs square monochrome pictures normalized to the [0,1] interval
   with tf.name_scope("image_prep"):
     input_image = tf.placeholder(tf.float32, input_shape)
     gray_image = tf.image.rgb_to_grayscale(input_image)
@@ -93,86 +65,73 @@ def train(config, summary_dir):
     normalized_image = tf.squeeze(resized_image)
     normalized_image = normalized_image / 256.0
 
-    # TODO: figure out why it isn't working and expects a 210, 160, 3 image
-    # tf.summary.image("normalized_image", [resized_image], 10)
-
-  print("imageprep made")
-
-  # TODO: parametrize sizes
+  # the input layer for the DQN agent
   with tf.name_scope("input"):
     input_state = tf.placeholder(tf.float32, [None, RESIZED_IMAGE_SIZE, RESIZED_IMAGE_SIZE, 4], name="input_state")
-    #norm_state = tf.contrib.layers.layer_norm(input_state)
     tf.summary.histogram("input_state", input_state)
-    #tf.summary.histogram("norm_state", norm_state)
-  
-  print("input made")
 
+  # the placeholder for the target Q values to give a basis to train the model
   with tf.name_scope("target"):
     targetQ = tf.placeholder(tf.float32, [None], name="targetQ")
     targetActionMask = tf.placeholder(tf.float32, [None, output_size], name="targetActionMask")
-  
-  print("target made")
 
+  # Xavier initializer to prevent gradient vanishing or exploding
   initializer = tf.contrib.layers.variance_scaling_initializer(factor=2.0, mode='FAN_IN', uniform=False, seed=None, dtype=tf.float32)
 
-  print("initializer made")
-
+  # The first convolutional layer input: [32x32x4] output: [16x16x8] filter: [3x3x4x8] stride: 2
   with tf.name_scope("conv1"):
     W_conv1 = tf.get_variable("conv1/W_conv1", shape=[3, 3, 4, 8], initializer=initializer)
     b_conv1 = tf.get_variable("conv1/b_conv1", shape=[8], initializer=initializer)
     r_conv1 = conv2d(input_state, W_conv1, 2) + b_conv1
-    #n_conv1 = tf.contrib.layers.layer_norm(r_conv1)
     h_conv1 = leakyRelu(r_conv1)
 
     tf.summary.histogram("W_conv1", W_conv1)
     tf.summary.histogram("b_conv1", b_conv1)
     tf.summary.histogram("r_conv1", r_conv1)
-    #tf.summary.histogram("n_conv1", n_conv1)
     tf.summary.histogram("h_conv1", h_conv1)
   
+  # The second convolutional layer input: [16x16x8] output: [8x8x16] filter: [3x3x8x16] stride: 2
   with tf.name_scope("conv2"):
     W_conv2 = tf.get_variable("conv2/W_conv2", shape=[3, 3, 8, 16], initializer=initializer)
     b_conv2 = tf.get_variable("conv2/b_conv2", shape=[16], initializer=initializer)
     r_conv2 = conv2d(h_conv1, W_conv2, 2) + b_conv2
-    #n_conv2 = tf.contrib.layers.layer_norm(r_conv2)
     h_conv2 = leakyRelu(r_conv2)
 
     tf.summary.histogram("W_conv2", W_conv2)
     tf.summary.histogram("b_conv2", b_conv2)
     tf.summary.histogram("r_conv2", r_conv2)
-    #tf.summary.histogram("n_conv2", n_conv2)
     tf.summary.histogram("h_conv2", h_conv2)
   
+  # The third convolutional layer input: [8x8x16] output: [4x4x32] filter: [3x3x16x32] stride: 2
   with tf.name_scope("conv3"):
     W_conv3 = tf.get_variable("conv3/W_conv3", shape=[3, 3, 16, 32], initializer=initializer)
     b_conv3 = tf.get_variable("conv3/b_conv3", shape=[32], initializer=initializer)
     r_conv3 = conv2d(h_conv2, W_conv3, 2) + b_conv3
-    #n_conv3  = tf.contrib.layers.layer_norm(r_conv3)
     h_conv3 = leakyRelu(r_conv3)
 
     tf.summary.histogram("W_conv3", W_conv3)
     tf.summary.histogram("b_conv3", b_conv3)
     tf.summary.histogram("r_conv3", r_conv3)
-    #tf.summary.histogram("n_conv3", n_conv3)
     tf.summary.histogram("h_conv3", h_conv3)
 
+  # Flatten the output tensor to a series of vectors
   with tf.name_scope("flatten"):
     flat_conv3 = tf.reshape(h_conv3, [-1, 512])
     tf.summary.histogram("flat_conv3", flat_conv3)
 
+  # The first hidden layer input: 512 output: 128
   with tf.name_scope("hidden"):
     W1 = tf.get_variable("hidden/W1", shape=[512, 128], initializer=initializer)
     b1 = tf.get_variable("hidden/b1", shape=[128], initializer=initializer)
     r_hidden = tf.matmul(flat_conv3, W1) + b1
-    #n_hidden = tf.contrib.layers.layer_norm(r_hidden)
     h_hidden = leakyRelu(r_hidden)
 
     tf.summary.histogram("W1", W1)
     tf.summary.histogram("b1", b1)
     tf.summary.histogram("r_hidden", r_hidden)
-    #tf.summary.histogram("n_hidden", n_hidden)
     tf.summary.histogram("h_hidden", h_hidden)
 
+  # The output layer input: 128 output: 4
   with tf.name_scope("output"):
     W2 = tf.get_variable("output/W2", shape=[128, output_size], initializer=initializer)
     b2 = tf.get_variable("output/b2", shape=[output_size], initializer=initializer)
@@ -182,30 +141,27 @@ def train(config, summary_dir):
     tf.summary.histogram("b2", b2)
     tf.summary.histogram("Q", Q)
 
+  # Array containing all the weight references
   weights = [W_conv1, b_conv1, W_conv2, b_conv2, W_conv3, b_conv3, W1, b1, W2, b2]
   
+  # The loss calculated from the network's Q values and the target Q values
   with tf.name_scope("Q_learning"):
     maskedQ = tf.reduce_sum(tf.multiply(Q, targetActionMask), reduction_indices=[1], name="maskedQ")
     loss = tf.reduce_mean(tf.square(tf.subtract(maskedQ, targetQ)), name="loss")
 
     tf.summary.scalar("loss", loss)
 
+  # The training operator to minimize loss
   with tf.name_scope("train"):
     train_op = tf.train.AdamOptimizer(LEARNING_RATE).minimize(loss)
-
-  print("Network made")
 
   # Merge summaries
   merged_summary = tf.summary.merge_all()
   tf.global_variables_initializer().run()
 
   # Summary writer and model saver
-  summary_writer = tf.summary.FileWriter(summary_dir, session.graph)
+  summary_writer = tf.summary.FileWriter(".", session.graph)
   model_saver = tf.train.Saver()
-
-  # TODO: if there is a model load it
-  model_saver.restore(session, "/tmp/tensorboard/model-13.ckpt")
-  print("Model restored")
 
   epsilon = EPSILON_MAX
   replay_memory = []
@@ -227,17 +183,18 @@ def train(config, summary_dir):
 
     # Take steps
     for step in range(MAX_STEPS):
-      if total_steps > MINIMUM_SAMPLE_SIZE:
-        environment.render()
       # Pick the next action and execute it
       action = None
       epsilon = update_epsilon(total_steps)
       if random.random() < epsilon:
+        # Random action
         action = environment.action_space.sample()
       else:
+        # Greedy action
         q_values = session.run(Q, feed_dict={input_state: [state]})
         action = q_values.argmax()
 
+      # Stack together the last 4 images
       image, reward, done, _ = environment.step(action)
       rewards += reward
       norm_image = normalized_image.eval(feed_dict = {input_image: image})
@@ -250,17 +207,14 @@ def train(config, summary_dir):
         print(total_steps)
 
       # Update replay memory
-      if total_steps < REPLAY_MEMORY_SIZE:
-        replay_memory.append((state, action, reward, observation, done))
-      # if total_steps > REPLAY_MEMORY_SIZE:
-      #   replay_memory.pop(0)
+      replay_memory.append((state, action, reward, observation, done))
+      if total_steps > REPLAY_MEMORY_SIZE:
+        replay_memory.pop(0)
       
       state = observation
 
       # Sample a random minibatch
       if total_steps > MINIMUM_SAMPLE_SIZE:
-        #environment.render()
-
         minibatch = random.sample(replay_memory, MINIBATCH_SIZE)
         next_states = [m[3] for m in minibatch]
         feed_dict = {input_state: next_states}
@@ -298,12 +252,12 @@ def train(config, summary_dir):
           summary_writer.add_summary(summary, total_steps)
 
         # Update target network
-        if total_steps % 100001 == 0:
+        if total_steps % TARGET_UPDATE_FREQ == 0:
           fixed_weights = session.run(weights)
         
         # Save model
-        if total_steps % 10001 == 0:
-          save_path = model_saver.save(session, summary_dir + "/model-" + str(int(np.mean(rewards_array))) + ".ckpt")
+        if total_steps % 10000 == 0:
+          save_path = model_saver.save(session, model_dir + "/model-" + str(int(np.mean(rewards_array))) + ".ckpt")
           print("Model saved in file: %s" % save_path)
 
       if done:
@@ -313,24 +267,6 @@ def train(config, summary_dir):
     if len(rewards_array) > 100:
       rewards_array.pop(0)
     print("Epsilon: {}, Mean: {}, Std: {}, Minimum: {}, Maximum: {}".format(epsilon, np.mean(rewards_array), np.std(rewards_array), min(rewards_array), max(rewards_array)))
-
-def play_test():
-  env = gym.make("Breakout-v0")
-  image = env.reset()
-  norm_image = normalized_image.eval(feed_dict = {input_image: image})
-  image_array = [norm_image, norm_image, norm_image, norm_image]
-  state = np.stack(image_array, axis=2)
-  done = False
-  steps = 0
-  for i in range(10000):
-    env.render()
-    state = np.stack(image_array, axis=2)
-    q_values = Q.eval(feed_dict = {input_state: [state]})
-    _, _, done, _ = env.step(np.argmax(q_values))
-    if done:
-      break
-    
-  return 
 
 def play_random():
   env = gym.make("Breakout-v0")
@@ -358,4 +294,4 @@ def play_random():
   return
 
 if __name__ == "__main__":
-  train(sys.argv[1], "/tmp/tensorboard")
+  train(sys.argv[1])
